@@ -94,7 +94,43 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse the query using the LLM
+    from groq import Groq
+    import os
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    parse_prompt = f"""Extract search parameters from this shopping query: "{query}"
+    Return ONLY a JSON object with these keys: description (str), size (str or null), max_price (float or null).
+    Example: {{"description": "vintage graphic tee", "size": "M", "max_price": 30.0}}"""
+    parse_response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": parse_prompt}],
+        max_tokens=100,
+    )
+    import json
+    try:
+        parsed = json.loads(parse_response.choices[0].message.content)
+    except:
+        parsed = {"description": query, "size": None, "max_price": None}
+    session["parsed"] = parsed
+
+    # Step 3: Search listings
+    results = search_listings(parsed["description"], parsed.get("size"), parsed.get("max_price"))
+    session["search_results"] = results
+    if not results:
+        session["error"] = f"No listings found for '{parsed['description']}'. Try a different description or relax the filters."
+        return session
+
+    # Step 4: Select top item
+    session["selected_item"] = results[0]
+
+    # Step 5: Suggest outfit
+    session["outfit_suggestion"] = suggest_outfit(results[0], wardrobe)
+
+    # Step 6: Create fit card
+    session["fit_card"] = create_fit_card(session["outfit_suggestion"], results[0])
+
+    # Step 7: Return session
     return session
 
 
